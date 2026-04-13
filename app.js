@@ -3,7 +3,7 @@
    ============================================ */
 
 // API base — works both locally and after deploy
-const API = '__PORT_8000__'.startsWith('__') ? 'http://localhost:8000' : '__PORT_8000__';
+const API = 'https://shift-workshop-api.onrender.com';
 
 // Dark mode toggle
 (function () {
