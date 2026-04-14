@@ -33,9 +33,9 @@ class RegistrationRequest(BaseModel):
     last_name: str = Field(..., min_length=1)
     email: EmailStr
     phone: str = Field(..., min_length=1)
-    production_goal: Optional[str] = ""
-    stuck: Optional[str] = ""
-    questions: Optional[str] = ""
+    Production goal this year: Optional[str] = ""
+    Where do you feel most stuck: Optional[str] = ""
+    Other questions: Optional[str] = ""
 
 
 ZOOM_ACCOUNT_ID = os.getenv("ZOOM_ACCOUNT_ID", "").strip()
