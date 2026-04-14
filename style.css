@@ -822,7 +822,7 @@
 
 .site-footer {
   margin-top: auto;
-  background: var(--color-sage);   
+  background: var(--color-sage);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: var(--space-6) var(--space-6);
   text-align: center;
