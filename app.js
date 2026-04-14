@@ -1,4 +1,4 @@
-const API_BASE = "https://YOUR-BACKEND-URL.onrender.com";
+const API_BASE = "https://shift-workshop-api.onrender.com";
 
 const form = document.getElementById("registration-form");
 const submitButton = document.getElementById("btn-submit");
@@ -81,7 +81,7 @@ if (form) {
             message = JSON.stringify(parsed);
           }
         } catch (error) {
-          // Keep raw text if response is not JSON
+          // keep raw text
         }
 
         showError(`Error ${response.status}: ${message}`);
@@ -89,8 +89,8 @@ if (form) {
       }
 
       form.reset();
-      showSuccess();
       clearError();
+      showSuccess();
     } catch (error) {
       showError(`Network error: ${error.message}`);
     } finally {
