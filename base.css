@@ -106,7 +106,7 @@ textarea,
 select {
   transition:
     color var(--transition-interactive),
-    background var(--transition-interactive),
+    background var(--transition-interactive),    
     border-color var(--transition-interactive),
     box-shadow var(--transition-interactive);
 }
