@@ -53,11 +53,20 @@ db.execute("""
         last_name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         phone TEXT,
+        production_goal TEXT,
+        stuck TEXT,
+        questions TEXT,
         zoom_join_url TEXT,
         zoom_registrant_id TEXT,
         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 """)
+# Add new columns if they don't exist yet (for existing deployments)
+for col in ["production_goal", "stuck", "questions"]:
+    try:
+        db.execute(f"ALTER TABLE registrants ADD COLUMN {col} TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 db.commit()
 
 # ── Zoom API helpers ────────────────────────────────────
@@ -146,6 +155,9 @@ class RegistrationRequest(BaseModel):
     last_name: str
     email: str
     phone: str = ""
+    production_goal: str = ""
+    stuck: str = ""
+    questions: str = ""
 
 @app.post("/api/register", status_code=201)
 async def register(req: RegistrationRequest):
@@ -153,6 +165,9 @@ async def register(req: RegistrationRequest):
     last = req.last_name.strip()
     email = req.email.strip().lower()
     phone = req.phone.strip()
+    production_goal = req.production_goal.strip()
+    stuck = req.stuck.strip()
+    questions = req.questions.strip()
     
     if not first or not last or not email:
         raise HTTPException(status_code=400, detail="First name, last name, and email are required.")
@@ -177,8 +192,10 @@ async def register(req: RegistrationRequest):
     # Save to local DB
     try:
         db.execute(
-            "INSERT INTO registrants (first_name, last_name, email, phone, zoom_join_url, zoom_registrant_id) VALUES (?, ?, ?, ?, ?, ?)",
-            [first, last, email, phone, zoom_join_url, zoom_registrant_id]
+            """INSERT INTO registrants 
+               (first_name, last_name, email, phone, production_goal, stuck, questions, zoom_join_url, zoom_registrant_id) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [first, last, email, phone, production_goal, stuck, questions, zoom_join_url, zoom_registrant_id]
         )
         db.commit()
     except sqlite3.IntegrityError:
@@ -194,7 +211,7 @@ async def register(req: RegistrationRequest):
 def list_registrants():
     """Admin endpoint — list all registrants."""
     rows = db.execute(
-        "SELECT id, first_name, last_name, email, phone, zoom_join_url, registered_at FROM registrants ORDER BY id DESC"
+        "SELECT id, first_name, last_name, email, phone, production_goal, stuck, questions, zoom_join_url, registered_at FROM registrants ORDER BY id DESC"
     ).fetchall()
     return [
         {
@@ -203,8 +220,11 @@ def list_registrants():
             "last_name": r[2],
             "email": r[3],
             "phone": r[4],
-            "has_zoom_link": bool(r[5]),
-            "registered_at": r[6],
+            "production_goal": r[5],
+            "stuck": r[6],
+            "questions": r[7],
+            "has_zoom_link": bool(r[8]),
+            "registered_at": r[9],
         }
         for r in rows
     ]
