@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
 load_dotenv()
@@ -24,8 +23,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static assets like app.js, css, images
-app.mount("/static", StaticFiles(directory=BASE_DIR), name="static")
+ZOOM_ACCOUNT_ID = os.getenv("ZOOM_ACCOUNT_ID", "").strip()
+ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID", "").strip()
+ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET", "").strip()
+ZOOM_MEETING_ID = os.getenv("ZOOM_MEETING_ID", "").strip()
 
 
 class RegistrationRequest(BaseModel):
@@ -33,15 +34,9 @@ class RegistrationRequest(BaseModel):
     last_name: str = Field(..., min_length=1)
     email: EmailStr
     phone: str = Field(..., min_length=1)
-    Production goal this year: Optional[str] = ""
-    Where do you feel most stuck: Optional[str] = ""
-    Other questions: Optional[str] = ""
-
-
-ZOOM_ACCOUNT_ID = os.getenv("ZOOM_ACCOUNT_ID", "").strip()
-ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID", "").strip()
-ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET", "").strip()
-ZOOM_MEETING_ID = os.getenv("ZOOM_MEETING_ID", "").strip()
+    production_goal: Optional[str] = ""
+    stuck: Optional[str] = ""
+    questions: Optional[str] = ""
 
 
 def get_zoom_access_token() -> str:
@@ -68,6 +63,7 @@ def get_zoom_access_token() -> str:
             error_data = {"message": response.text}
 
         print(f"Zoom token error: {response.status_code} - {error_data}")
+
         raise HTTPException(
             status_code=500,
             detail=error_data.get("reason") or error_data.get("message") or "Could not get Zoom access token.",
@@ -77,7 +73,10 @@ def get_zoom_access_token() -> str:
     access_token = token_data.get("access_token")
 
     if not access_token:
-        raise HTTPException(status_code=500, detail="Zoom access token missing from token response.")
+        raise HTTPException(
+            status_code=500,
+            detail="Zoom access token missing from response."
+        )
 
     return access_token
 
@@ -100,22 +99,21 @@ def register_user(payload: RegistrationRequest):
         "custom_questions": [],
     }
 
-    # These titles must match the custom question titles in Zoom.
     if payload.production_goal and payload.production_goal.strip():
         zoom_payload["custom_questions"].append({
-            "title": "What's your production goal this year? (units and volume)",
+            "title": "Production goal this year",
             "value": payload.production_goal.strip(),
         })
 
     if payload.stuck and payload.stuck.strip():
         zoom_payload["custom_questions"].append({
-            "title": "Where do you feel most stuck in your business today?",
+            "title": "Where do you feel most stuck",
             "value": payload.stuck.strip(),
         })
 
     if payload.questions and payload.questions.strip():
         zoom_payload["custom_questions"].append({
-            "title": "Other questions?",
+            "title": "Other questions",
             "value": payload.questions.strip(),
         })
 
@@ -137,17 +135,9 @@ def register_user(payload: RegistrationRequest):
 
         print(f"Zoom API error: {response.status_code} - {error_data}")
 
-        message = error_data.get("message") or "Zoom registration failed."
-
-        if response.status_code == 429:
-            raise HTTPException(
-                status_code=429,
-                detail=message,
-            )
-
         raise HTTPException(
-            status_code=422,
-            detail=message,
+            status_code=response.status_code if response.status_code in (400, 401, 403, 404, 409, 429) else 422,
+            detail=error_data,
         )
 
     data = response.json()
