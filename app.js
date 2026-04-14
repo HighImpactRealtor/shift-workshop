@@ -65,10 +65,24 @@ if (form) {
         body: JSON.stringify(payload)
       });
 
-      const result = await response.json().catch(() => ({}));
+      const rawText = await response.text();
+      console.log("Register response status:", response.status);
+      console.log("Register response body:", rawText);
+
+      let result = {};
+      try {
+        result = rawText ? JSON.parse(rawText) : {};
+      } catch (e) {
+        result = {};
+      }
 
       if (!response.ok) {
-        throw new Error(result.detail || result.message || "Registration failed. Please try again.");
+        throw new Error(
+          result.detail ||
+          result.message ||
+          rawText ||
+          "Registration failed. Please try again."
+        );
       }
 
       form.reset();
