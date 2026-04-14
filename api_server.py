@@ -19,7 +19,7 @@ If Zoom creds are not set, the server runs in "standalone" mode
 """
 
 import os
-import json
+import io
 import sqlite3
 import time
 import base64
@@ -27,9 +27,12 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 import httpx
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 # ── Config ──────────────────────────────────────────────
 
@@ -228,6 +231,63 @@ def list_registrants():
         }
         for r in rows
     ]
+
+@app.get("/api/export")
+def export_registrants():
+    """Download all registrants as a formatted Excel file."""
+    rows = db.execute(
+        """SELECT first_name, last_name, email, phone, production_goal, stuck, questions, 
+                  zoom_join_url, registered_at 
+           FROM registrants ORDER BY registered_at ASC"""
+    ).fetchall()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Registrants"
+
+    # ── Header styling ──
+    header_fill = PatternFill("solid", fgColor="4A7C59")   # sage green
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    headers = [
+        "First Name", "Last Name", "Email", "Phone",
+        "Production Goal (Units & Volume)", "Where They Feel Stuck",
+        "Other Questions", "Zoom Join URL", "Registered At"
+    ]
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    ws.row_dimensions[1].height = 30
+
+    # ── Data rows ──
+    for row_idx, row in enumerate(rows, start=2):
+        for col_idx, value in enumerate(row, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value or "")
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        # Alternate row shading
+        if row_idx % 2 == 0:
+            for col_idx in range(1, len(headers) + 1):
+                ws.cell(row=row_idx, column=col_idx).fill = PatternFill("solid", fgColor="F0F5F1")
+
+    # ── Column widths ──
+    col_widths = [14, 14, 28, 16, 35, 40, 35, 45, 20]
+    for col_idx, width in enumerate(col_widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = width
+
+    # ── Stream response ──
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    filename = f"shift_registrants_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.get("/api/stats")
 def stats():
