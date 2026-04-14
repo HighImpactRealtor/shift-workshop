@@ -5,7 +5,7 @@ const successBox = document.getElementById("form-success");
 
 function showError(message) {
   if (!errorBox) return;
-  errorBox.textContent = message;
+  errorBox.textContent = String(message);
   errorBox.style.display = "block";
 }
 
@@ -49,10 +49,6 @@ if (form) {
       return;
     }
 
-    if (!form.reportValidity()) {
-      return;
-    }
-
     submitButton.disabled = true;
     submitButton.textContent = "Submitting...";
 
@@ -66,30 +62,33 @@ if (form) {
       });
 
       const rawText = await response.text();
-      console.log("Register response status:", response.status);
-      console.log("Register response body:", rawText);
-
-      let result = {};
-      try {
-        result = rawText ? JSON.parse(rawText) : {};
-      } catch (e) {
-        result = {};
-      }
 
       if (!response.ok) {
-        throw new Error(
-          result.detail ||
-          result.message ||
-          rawText ||
-          "Registration failed. Please try again."
-        );
+        let message = rawText || `HTTP ${response.status}`;
+
+        try {
+          const parsed = JSON.parse(rawText);
+          if (typeof parsed.detail === "string") {
+            message = parsed.detail;
+          } else if (parsed.detail && typeof parsed.detail.message === "string") {
+            message = parsed.detail.message;
+          } else if (typeof parsed.message === "string") {
+            message = parsed.message;
+          } else {
+            message = JSON.stringify(parsed);
+          }
+        } catch (e) {
+          // keep rawText
+        }
+
+        showError(`Error ${response.status}: ${message}`);
+        return;
       }
 
       form.reset();
       showSuccess();
-      form.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (error) {
-      showError(error.message || "Something went wrong. Please try again.");
+      showError(`Network error: ${error.message}`);
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "Reserve My Seat";
