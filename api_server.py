@@ -81,6 +81,11 @@ def get_zoom_access_token() -> str:
     return access_token
 
 
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
 @app.post("/api/register")
 def register_user(payload: RegistrationRequest):
     if not ZOOM_MEETING_ID:
@@ -173,8 +178,3 @@ def serve_style_css():
 @app.get("/jeremy-larkin.jpeg")
 def serve_jeremy_image():
     return FileResponse(BASE_DIR / "jeremy-larkin.jpeg")
-
-
-@app.get("/Image_20260304_105010_282.jpeg")
-def serve_uploaded_image():
-    return FileResponse(BASE_DIR / "Image_20260304_105010_282.jpeg")
