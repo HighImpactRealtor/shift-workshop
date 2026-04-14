@@ -63,7 +63,6 @@ def get_zoom_access_token() -> str:
             error_data = {"message": response.text}
 
         print(f"Zoom token error: {response.status_code} - {error_data}")
-
         raise HTTPException(
             status_code=500,
             detail=error_data.get("reason") or error_data.get("message") or "Could not get Zoom access token.",
@@ -73,10 +72,7 @@ def get_zoom_access_token() -> str:
     access_token = token_data.get("access_token")
 
     if not access_token:
-        raise HTTPException(
-            status_code=500,
-            detail="Zoom access token missing from response."
-        )
+        raise HTTPException(status_code=500, detail="Zoom access token missing from response.")
 
     return access_token
 
@@ -89,10 +85,7 @@ def health():
 @app.post("/api/register")
 def register_user(payload: RegistrationRequest):
     if not ZOOM_MEETING_ID:
-        raise HTTPException(
-            status_code=500,
-            detail="Missing ZOOM_MEETING_ID."
-        )
+        raise HTTPException(status_code=500, detail="Missing ZOOM_MEETING_ID.")
 
     access_token = get_zoom_access_token()
 
