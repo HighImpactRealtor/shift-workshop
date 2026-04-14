@@ -1,3 +1,5 @@
+const API_BASE = "https://YOUR-BACKEND-URL.onrender.com";
+
 const form = document.getElementById("registration-form");
 const submitButton = document.getElementById("btn-submit");
 const errorBox = document.getElementById("form-error");
@@ -53,7 +55,7 @@ if (form) {
     submitButton.textContent = "Submitting...";
 
     try {
-      const response = await fetch("/api/register", {
+      const response = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -68,6 +70,7 @@ if (form) {
 
         try {
           const parsed = JSON.parse(rawText);
+
           if (typeof parsed.detail === "string") {
             message = parsed.detail;
           } else if (parsed.detail && typeof parsed.detail.message === "string") {
@@ -77,8 +80,8 @@ if (form) {
           } else {
             message = JSON.stringify(parsed);
           }
-        } catch (e) {
-          // keep rawText
+        } catch (error) {
+          // Keep raw text if response is not JSON
         }
 
         showError(`Error ${response.status}: ${message}`);
@@ -87,6 +90,7 @@ if (form) {
 
       form.reset();
       showSuccess();
+      clearError();
     } catch (error) {
       showError(`Network error: ${error.message}`);
     } finally {
