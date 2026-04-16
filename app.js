@@ -52,7 +52,7 @@ if (form) {
     }
 
     submitButton.disabled = true;
-    submitButton.textContent = "Submitting...";
+    submitButton.textContent = "Saving your seat...";
 
     try {
       const response = await fetch(`${API_BASE}/api/register`, {
@@ -70,7 +70,6 @@ if (form) {
 
         try {
           const parsed = JSON.parse(rawText);
-
           if (typeof parsed.detail === "string") {
             message = parsed.detail;
           } else if (parsed.detail && typeof parsed.detail.message === "string") {
@@ -91,6 +90,7 @@ if (form) {
       form.reset();
       clearError();
       showSuccess();
+      successBox.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (error) {
       showError(`Network error: ${error.message}`);
     } finally {
