@@ -1,10 +1,12 @@
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -28,6 +30,11 @@ ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID", "").strip()
 ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET", "").strip()
 ZOOM_MEETING_ID = os.getenv("ZOOM_MEETING_ID", "").strip()
 
+zoom_session = requests.Session()
+token_lock = threading.Lock()
+cached_zoom_token = None
+cached_zoom_token_expires_at = 0
+
 
 class RegistrationRequest(BaseModel):
     first_name: str = Field(..., min_length=1)
@@ -39,42 +46,142 @@ class RegistrationRequest(BaseModel):
     questions: Optional[str] = ""
 
 
-def get_zoom_access_token() -> str:
+def get_zoom_access_token(force_refresh: bool = False) -> str:
+    global cached_zoom_token, cached_zoom_token_expires_at
+
     if not ZOOM_ACCOUNT_ID or not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET:
         raise HTTPException(
             status_code=500,
             detail="Missing Zoom credentials. Check ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET."
         )
 
-    response = requests.post(
-        "https://zoom.us/oauth/token",
-        params={
-            "grant_type": "account_credentials",
-            "account_id": ZOOM_ACCOUNT_ID,
-        },
-        auth=(ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET),
-        timeout=30,
-    )
+    now = time.time()
 
-    if not response.ok:
-        try:
-            error_data = response.json()
-        except Exception:
-            error_data = {"message": response.text}
+    if not force_refresh and cached_zoom_token and now < cached_zoom_token_expires_at - 60:
+        return cached_zoom_token
 
-        print(f"Zoom token error: {response.status_code} - {error_data}")
-        raise HTTPException(
-            status_code=500,
-            detail=error_data.get("reason") or error_data.get("message") or "Could not get Zoom access token.",
+    with token_lock:
+        now = time.time()
+        if not force_refresh and cached_zoom_token and now < cached_zoom_token_expires_at - 60:
+            return cached_zoom_token
+
+        response = zoom_session.post(
+            "https://zoom.us/oauth/token",
+            params={
+                "grant_type": "account_credentials",
+                "account_id": ZOOM_ACCOUNT_ID,
+            },
+            auth=(ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET),
+            timeout=10,
         )
 
-    token_data = response.json()
-    access_token = token_data.get("access_token")
+        if not response.ok:
+            try:
+                error_data = response.json()
+            except Exception:
+                error_data = {"message": response.text}
 
-    if not access_token:
-        raise HTTPException(status_code=500, detail="Zoom access token missing from response.")
+            print(f"Zoom token error: {response.status_code} - {error_data}")
 
-    return access_token
+            raise HTTPException(
+                status_code=500,
+                detail=error_data.get("reason") or error_data.get("message") or "Could not get Zoom access token.",
+            )
+
+        token_data = response.json()
+        access_token = token_data.get("access_token")
+        expires_in = int(token_data.get("expires_in", 3600))
+
+        if not access_token:
+            raise HTTPException(status_code=500, detail="Zoom access token missing from response.")
+
+        cached_zoom_token = access_token
+        cached_zoom_token_expires_at = time.time() + expires_in
+
+        return cached_zoom_token
+
+
+def build_zoom_payload(registration: dict) -> dict:
+    zoom_payload = {
+        "email": registration["email"],
+        "first_name": registration["first_name"].strip(),
+        "last_name": registration["last_name"].strip(),
+        "phone": registration["phone"].strip(),
+        "custom_questions": [],
+    }
+
+    production_goal = (registration.get("production_goal") or "").strip()
+    stuck = (registration.get("stuck") or "").strip()
+    questions = (registration.get("questions") or "").strip()
+
+    if production_goal:
+        zoom_payload["custom_questions"].append({
+            "title": "Production goal this year",
+            "value": production_goal,
+        })
+
+    if stuck:
+        zoom_payload["custom_questions"].append({
+            "title": "Where do you feel most stuck",
+            "value": stuck,
+        })
+
+    if questions:
+        zoom_payload["custom_questions"].append({
+            "title": "Other questions",
+            "value": questions,
+        })
+
+    return zoom_payload
+
+
+def send_to_zoom_in_background(registration: dict) -> None:
+    try:
+        access_token = get_zoom_access_token()
+        zoom_payload = build_zoom_payload(registration)
+
+        response = zoom_session.post(
+            f"https://api.zoom.us/v2/meetings/{ZOOM_MEETING_ID}/registrants",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json=zoom_payload,
+            timeout=12,
+        )
+
+        if response.status_code == 401:
+            access_token = get_zoom_access_token(force_refresh=True)
+            response = zoom_session.post(
+                f"https://api.zoom.us/v2/meetings/{ZOOM_MEETING_ID}/registrants",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=zoom_payload,
+                timeout=12,
+            )
+
+        if not response.ok:
+            try:
+                error_data = response.json()
+            except Exception:
+                error_data = {"message": response.text}
+
+            print(
+                f"Zoom background registration failed for {registration['email']}: "
+                f"{response.status_code} - {error_data}"
+            )
+            return
+
+        data = response.json()
+        print(
+            f"Zoom registration succeeded for {registration['email']}: "
+            f"registrant_id={data.get('registrant_id')}"
+        )
+
+    except Exception as error:
+        print(f"Unexpected background registration error for {registration.get('email')}: {error}")
 
 
 @app.get("/api/health")
@@ -83,68 +190,23 @@ def health():
 
 
 @app.post("/api/register")
-def register_user(payload: RegistrationRequest):
+def register_user(payload: RegistrationRequest, background_tasks: BackgroundTasks):
     if not ZOOM_MEETING_ID:
         raise HTTPException(status_code=500, detail="Missing ZOOM_MEETING_ID.")
 
-    access_token = get_zoom_access_token()
-
-    zoom_payload = {
-        "email": payload.email,
-        "first_name": payload.first_name.strip(),
-        "last_name": payload.last_name.strip(),
-        "phone": payload.phone.strip(),
-        "custom_questions": [],
-    }
-
-    if payload.production_goal and payload.production_goal.strip():
-        zoom_payload["custom_questions"].append({
-            "title": "Production goal this year",
-            "value": payload.production_goal.strip(),
-        })
-
-    if payload.stuck and payload.stuck.strip():
-        zoom_payload["custom_questions"].append({
-            "title": "Where do you feel most stuck",
-            "value": payload.stuck.strip(),
-        })
-
-    if payload.questions and payload.questions.strip():
-        zoom_payload["custom_questions"].append({
-            "title": "Other questions",
-            "value": payload.questions.strip(),
-        })
-
-    response = requests.post(
-        f"https://api.zoom.us/v2/meetings/{ZOOM_MEETING_ID}/registrants",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        },
-        json=zoom_payload,
-        timeout=30,
-    )
-
-    if not response.ok:
-        try:
-            error_data = response.json()
-        except Exception:
-            error_data = {"message": response.text}
-
-        print(f"Zoom API error: {response.status_code} - {error_data}")
-
+    if not ZOOM_ACCOUNT_ID or not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET:
         raise HTTPException(
-            status_code=response.status_code if response.status_code in (400, 401, 403, 404, 409, 429) else 422,
-            detail=error_data,
+            status_code=500,
+            detail="Missing Zoom credentials. Check ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET."
         )
 
-    data = response.json()
+    registration = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+
+    background_tasks.add_task(send_to_zoom_in_background, registration)
 
     return {
         "success": True,
-        "message": "Registration successful.",
-        "registrant_id": data.get("registrant_id"),
-        "join_url": data.get("join_url"),
+        "message": "Registration received. Watch your inbox for your Zoom confirmation email.",
     }
 
 
